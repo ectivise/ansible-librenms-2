@@ -1,0 +1,41 @@
+# epel repo
+- name: install epel
+  yum:
+    name: epel-release
+    state: latest
+
+# webtatic repo
+- name: install webtatic
+  yum:
+    name: https://mirror.webtatic.com/yum/el7/webtatic-release.rpm
+    state: latest
+
+# update pkgs & install mendatory pkgs
+- name: update
+  yum:
+    name: '*'
+    state: latest
+  tags: update
+- name: install package list
+  yum: 
+    name: '{{ pkg }}'
+    state: latest
+  vars:
+    pkg: '{{ pkgs }}'
+
+# enable and start services
+- name: enable & start services
+  systemd:
+    name: '{{ item }}'
+    enabled: yes
+    masked: no
+    state: started
+    daemon_reload: yes
+  with_items:
+    - php-fpm
+    - crond
+    - snmpd
+    - rsyslog
+    - snmptrapd
+    - mariadb
+    - nginx

@@ -1,0 +1,27 @@
+# default config
+- name: copy config.php
+  copy:
+    src: config.php
+    dest: /opt/librenms/config.php
+    owner: librenms
+    group: librenms
+    mode: '0644'
+- name: build db schema
+  command: /opt/librenms/build-base.php
+  ignore_errors: yes
+
+# solve db schema, admin & permissions issues
+- name: set admin user
+  command: /opt/librenms/adduser.php admin {{ app_admin_pass }} 10 example@domain.tld
+  ignore_errors: yes
+  vars:
+    app_admin_pass: '{{ vault_app_admin_pass }}'
+- name: set files permissions
+  shell: 
+    cmd: |
+      chown -R librenms:librenms /opt/librenms
+      chmod 770 /opt/librenms
+      setfacl -d -m g::rwx /opt/librenms/rrd /opt/librenms/logs /opt/librenms/bootstrap/cache/ /opt/librenms/storage/
+      setfacl -R -m g::rwx /opt/librenms/rrd /opt/librenms/logs /opt/librenms/bootstrap/cache/ /opt/librenms/storage/
+      chown -R librenms:librenms /opt/librenms/html/plugins/Weathermap/
+      chmod 775 /opt/librenms/html/plugins/Weathermap/configs

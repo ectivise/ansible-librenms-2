@@ -1,0 +1,171 @@
+# user mgmt
+- name: create librenms group
+  group:
+    name: librenms
+    state: present
+- name: create librenms user
+  user:
+    name: librenms
+    group: librenms
+    system: yes
+    create_home: no
+    home: /opt/librenms
+    state: present
+- name: add nginx to librenms group
+  user:
+    name: nginx
+    append: yes
+    groups: librenms
+    state: present
+
+# install
+- name: clone librenms repo
+  git:
+    repo: 'https://github.com/librenms/librenms.git'
+    dest: /opt/librenms
+    version: master
+- name: set permissions
+  shell: 
+    cmd: |
+      chown -R librenms:librenms /opt/librenms
+      chmod 770 /opt/librenms
+      setfacl -d -m g::rwx /opt/librenms/rrd /opt/librenms/logs /opt/librenms/bootstrap/cache/ /opt/librenms/storage/
+      setfacl -R -m g::rwx /opt/librenms/rrd /opt/librenms/logs /opt/librenms/bootstrap/cache/ /opt/librenms/storage/
+      chgrp apache /var/lib/php/session/
+- name: install dependencies
+  shell: 
+    cmd: |
+      /opt/librenms/scripts/composer_wrapper.php install --no-dev
+  become: true
+  become_user: librenms
+
+# db
+- name: set root passwd
+  mysql_user:
+    name: root
+    password: '{{ db_root_pass }}'
+    host: localhost
+    state: present
+  vars:
+    db_root_pass: "{{ vault_db_root_pass }}"
+- name: set root .my.cnf
+  blockinfile:
+    path: /root/.my.cnf
+    owner: root
+    group: root
+    mode: 0600
+    create: yes
+    marker: "# {mark} ANSIBLE MANAGED BLOCK #"
+    block: |
+      [client]
+      user = root
+      password = {{ db_root_pass }}
+  vars:
+    db_root_pass: "{{ vault_db_root_pass }}"
+- name: create librenms db
+  mysql_db:
+    name: librenms
+    state: present
+- name: create librenms user
+  mysql_user:
+    name: librenms
+    password: '{{ db_librenms_pass }}'
+    host: localhost
+    priv: "librenms.*:ALL,GRANT"
+    state: present
+  vars:
+    db_librenms_pass: '{{ vault_db_librenms_pass }}'
+
+# php
+- name: set php.ini
+  lineinfile: 
+    path: /etc/php.ini
+    regexp: '^;?{{ item.key }} =.*$'
+    line: '{{ item.key }} = {{ item.value }}'
+  with_items:
+  - key: default_charset
+    value: '"UTF-8"'
+  - key: date.timezone
+    value: '"{{ timezone }}"'
+- name: set www.conf
+  lineinfile:
+    path: /etc/php-fpm.d/www.conf
+    regexp: '^;?{{ item.key }} =.*$'
+    line: '{{ item.key }} = {{ item.value }}'
+  with_items:
+    - key: user
+      value: 'nginx'
+    - key: group
+      value: 'apache'
+    - key: listen
+      value: '/var/run/php-fpm/php7.2-fpm.sock'
+    - key: listen.owner
+      value: 'nginx'
+    - key: listen.group
+      value: 'nginx'
+    - key: listen.mode
+      value: '0600'
+  notify:
+    - restart php-fpm
+
+# nginx
+- name: copy nginx.conf
+  copy:
+    src: nginx.conf
+    dest: /etc/nginx/nginx.conf
+    owner: root
+    group: root
+    mode: '0644'
+- name: copy librenms.conf
+  copy:
+    src: librenms.conf
+    dest: /etc/nginx/conf.d/librenms.conf
+    owner: root
+    group: root
+    mode: '0644'
+  notify:
+    - restart nginx
+
+# selinux
+- name: disable selinux
+  shell: 
+    cmd: |
+      setenforce 0
+
+# firewall
+- name: set port 80
+  firewalld:
+    port: 80/tcp
+    permanent: true
+    immediate: true
+    state: enabled
+
+# snmp
+- name: copy librenms snmpd.conf
+  shell:
+    cmd: |
+      cp /opt/librenms/snmpd.conf.example /etc/snmp/snmpd.conf
+- name: replace default community
+  replace:
+    path: /etc/snmp/snmpd.conf
+    regexp: 'RANDOMSTRINGGOESHERE'
+    replace: 'public'
+- name: setup snmp distro
+  shell: 
+    cmd: |
+      curl -o /usr/bin/distro https://raw.githubusercontent.com/librenms/librenms-agent/master/snmp/distro
+      chmod +x /usr/bin/distro
+  notify:
+    - restart snmpd
+
+# cron
+- name: set cron
+  shell: 
+    cmd: |
+      cp /opt/librenms/librenms.nonroot.cron /etc/cron.d/librenms
+
+# logs
+- name: set logrotate
+  shell: 
+    cmd: |
+      cp /opt/librenms/misc/librenms.logrotate /etc/logrotate.d/librenms
