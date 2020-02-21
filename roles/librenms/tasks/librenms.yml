@@ -24,6 +24,7 @@
     repo: 'https://github.com/librenms/librenms.git'
     dest: /opt/librenms
     version: master
+    force: yes
 - name: set permissions
   shell: 
     cmd: |
@@ -135,10 +136,13 @@
 # firewall
 - name: set port 80
   firewalld:
-    port: 80/tcp
+    port: "{{ item }}"
     permanent: true
     immediate: true
     state: enabled
+  with_items:
+    - 80/tcp
+    - 162/udp
 
 # snmp
 - name: copy librenms snmpd.conf
