@@ -28,3 +28,4 @@ pkgs:
   - php72w-zip
   - python-memcached
   - rrdtool
+  - php-pear
